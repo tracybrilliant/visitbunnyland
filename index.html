@@ -1,0 +1,1687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HUA's KITCHEN - Be My Guest</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <style>
+    /* Hide scrollbar for cleaner UI in lists */
+    .hide-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .hide-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    body {
+      background-color: #f8fafc;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect, useRef } from 'https://esm.sh/react@18';
+    import { createRoot } from 'https://esm.sh/react-dom@18/client';
+    
+    import {
+      format, addMonths, startOfMonth, endOfMonth, eachDayOfInterval,
+      isSameMonth, isSameDay, addDays, startOfWeek, endOfWeek, isBefore,
+      startOfDay, parse
+    } from 'https://esm.sh/date-fns@3';
+    
+    import {
+      Trash2, Check, Edit, List, Image as ImageIcon, Newspaper, ArrowDown,
+      Home, Utensils, ChevronRight, ChevronLeft, Clock, MessageSquare,
+      CheckCircle2, User, Calendar as CalendarIcon, Settings, XCircle, Plus, Flower2
+    } from 'https://esm.sh/lucide-react@0.378.0';
+
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    // --- Firebase Configuration ---
+    // 替换为您自己的 Firebase 配置以激活实时数据库
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY_HERE",
+      authDomain: "your-project.firebaseapp.com",
+      projectId: "your-project-id",
+      storageBucket: "your-project.appspot.com",
+      messagingSenderId: "123456789",
+      appId: "1:123456789:web:abcdef"
+    };
+
+    // --- Mock Data & Initial State ---
+    const INITIAL_HERO_IMAGES = [
+      "https://images.unsplash.com/photo-1550966871-3ed3cdb5ed0c?q=80&w=2070&auto=format&fit=crop",
+      "https://images.unsplash.com/photo-1514361892635-6b07e31e75f3?q=80&w=2070&auto=format&fit=crop",
+      "https://images.unsplash.com/photo-1559339352-11d035aa65de?q=80&w=1974&auto=format&fit=crop"
+    ];
+
+    const INITIAL_NEWS = [
+      {
+        id: 'news-1',
+        title: 'A New Autumn Symphony',
+        date: '2026-10-09',
+        content: 'As the leaves begin to turn, we are thrilled to introduce our new Autumn course. Featuring hand-foraged mushrooms, rich truffles, and seasonal root vegetables prepared with modern techniques.',
+        imageUrl: 'https://images.unsplash.com/photo-1541832676-9b763b0239ab?q=80&w=2000&auto=format&fit=crop'
+      },
+      {
+        id: 'news-2',
+        title: 'Cellar Updates',
+        date: '2026-09-28',
+        content: 'Our private cellar has just received a rare allocation of vintage Burgundy. For friends visiting this month, ask about our special pairing options off-menu.',
+        imageUrl: 'https://images.unsplash.com/photo-1506377247377-2a5b3b417ebb?q=80&w=2000&auto=format&fit=crop'
+      },
+      {
+        id: 'news-3',
+        title: 'The Art of Plating',
+        date: '2026-09-15',
+        content: 'We believe that we eat with our eyes first. Our latest journal entry explores the meticulous process behind our new dessert presentation, inspired by contemporary minimalist architecture.',
+        imageUrl: 'https://images.unsplash.com/photo-1481931098730-318b6f776db0?q=80&w=2000&auto=format&fit=crop'
+      }
+    ];
+
+    const INITIAL_MENU = [
+      { id: 'm1', name: 'Standard Course', description: 'Appetizer, Main (Chicken/Fish), Dessert', price: 'Free for friends!' },
+      { id: 'm2', name: 'Premium Course', description: 'Appetizer, Soup, Main (Beef), Dessert, Drinks', price: 'Bring a bottle of wine' },
+      { id: 'm3', name: 'Light Snacks', description: 'Cheese board, crackers, fruits, light drinks', price: 'Free' },
+    ];
+
+    const INITIAL_QUESTIONS = [
+      { id: 'q1', text: 'Do you have any food allergies?', type: 'text' },
+      { id: 'q2', text: 'How are you traveling here?', type: 'select', options: ['Train', 'Car', 'Walking'] },
+    ];
+
+    const generateMockAvailability = () => {
+      const slots = [];
+      const today = new Date();
+      for (let i = 1; i <= 60; i++) {
+        const currentDate = addDays(today, i);
+        if (currentDate.getDay() === 6 || currentDate.getDay() === 0) {
+          slots.push({ id: `slot-${i}-1`, date: format(currentDate, 'yyyy-MM-dd'), startTime: '11:00', endTime: '14:00' });
+          slots.push({ id: `slot-${i}-2`, date: format(currentDate, 'yyyy-MM-dd'), startTime: '18:00', endTime: '21:00' });
+        } else if (currentDate.getDay() === 3) {
+          slots.push({ id: `slot-${i}-3`, date: format(currentDate, 'yyyy-MM-dd'), startTime: '19:00', endTime: '22:00' });
+        }
+      }
+      return slots;
+    };
+
+    const INITIAL_AVAILABILITY = generateMockAvailability();
+
+    // --- Main App Component ---
+    function App() {
+      const [viewMode, setViewMode] = useState('visitor'); 
+      const [showWelcome, setShowWelcome] = useState(true); 
+      
+      const [isMockMode, setIsMockMode] = useState(true);
+      const [dbInstance, setDbInstance] = useState(null);
+      const [isDbLoading, setIsDbLoading] = useState(true);
+
+      const [menuItems, setMenuItems] = useState(INITIAL_MENU);
+      const [questions, setQuestions] = useState(INITIAL_QUESTIONS);
+      const [availableSlots, setAvailableSlots] = useState(INITIAL_AVAILABILITY);
+      const [heroImages, setHeroImages] = useState(INITIAL_HERO_IMAGES);
+      const [newsArticles, setNewsArticles] = useState(INITIAL_NEWS);
+      
+      const [bookings, setBookings] = useState([
+        {
+          id: 'b1',
+          visitorName: 'Alice',
+          slots: [], 
+          answers: { q1: 'None', q2: 'Train' },
+          menuChoice: 'm1',
+          customProposal: '',
+          status: 'confirmed', 
+          eventName: "Alice's Welcome Lunch", 
+          createdAt: new Date().toISOString(),
+        }
+      ]);
+
+      useEffect(() => {
+        if (firebaseConfig.apiKey === "YOUR_API_KEY_HERE" || !firebaseConfig.apiKey) {
+          console.log("Running in Mock Mode. Add Firebase config to enable real-time database.");
+          setIsMockMode(true);
+          setIsDbLoading(false);
+          return;
+        }
+
+        try {
+          const app = initializeApp(firebaseConfig);
+          const db = getFirestore(app);
+          setDbInstance(db);
+          setIsMockMode(false);
+
+          const unsubSettings = onSnapshot(doc(db, 'system', 'settings'), (docSnap) => {
+            if (docSnap.exists()) {
+              const data = docSnap.data();
+              if (data.menuItems) setMenuItems(data.menuItems);
+              if (data.questions) setQuestions(data.questions);
+              if (data.availableSlots) setAvailableSlots(data.availableSlots);
+              if (data.heroImages) setHeroImages(data.heroImages);
+              if (data.newsArticles) setNewsArticles(data.newsArticles);
+            } else {
+              setDoc(doc(db, 'system', 'settings'), {
+                menuItems: INITIAL_MENU,
+                questions: INITIAL_QUESTIONS,
+                availableSlots: INITIAL_AVAILABILITY,
+                heroImages: INITIAL_HERO_IMAGES,
+                newsArticles: INITIAL_NEWS
+              });
+            }
+            setIsDbLoading(false);
+          });
+
+          const unsubBookings = onSnapshot(collection(db, 'bookings'), (snap) => {
+            const bks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            bks.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+            setBookings(bks);
+          });
+
+          return () => {
+            unsubSettings();
+            unsubBookings();
+          };
+        } catch (error) {
+          console.error("Firebase init error:", error);
+          setIsMockMode(true);
+          setIsDbLoading(false);
+        }
+      }, []);
+
+      const updateSettingsDB = async (updates) => {
+        if (!isMockMode && dbInstance) {
+          try {
+            await setDoc(doc(dbInstance, 'system', 'settings'), updates, { merge: true });
+          } catch (e) {
+            console.error("Failed to update settings in DB:", e);
+          }
+        }
+      };
+
+      const updateBookingDB = async (booking) => {
+        if (!isMockMode && dbInstance) {
+          try {
+            await setDoc(doc(dbInstance, 'bookings', booking.id), booking);
+          } catch (e) {
+            console.error("Failed to update booking in DB:", e);
+          }
+        }
+      };
+
+      const wrappedSetMenuItems = (newItems) => { setMenuItems(newItems); updateSettingsDB({ menuItems: newItems }); };
+      const wrappedSetQuestions = (newQs) => { setQuestions(newQs); updateSettingsDB({ questions: newQs }); };
+      const wrappedSetAvailableSlots = (newSlots) => { setAvailableSlots(newSlots); updateSettingsDB({ availableSlots: newSlots }); };
+      const wrappedSetHeroImages = (newImgs) => { setHeroImages(newImgs); updateSettingsDB({ heroImages: newImgs }); };
+      const wrappedSetNewsArticles = (newNews) => { setNewsArticles(newNews); updateSettingsDB({ newsArticles: newNews }); };
+      const handleBook = (newBooking) => { setBookings([...bookings, newBooking]); updateBookingDB(newBooking); };
+      const handleUpdateBooking = (updatedBooking) => {
+        setBookings(bookings.map(b => b.id === updatedBooking.id ? updatedBooking : b));
+        updateBookingDB(updatedBooking);
+      };
+
+      const handleConfirmBooking = (bookingId, slotId, eventName) => {
+        const booking = bookings.find(b => b.id === bookingId);
+        const selectedSlot = booking.slots.find(s => s.id === slotId);
+
+        const updatedBooking = {
+          ...booking,
+          status: 'confirmed',
+          eventName: eventName || `${booking.visitorName}'s Visit`,
+          slots: [selectedSlot]
+        }
+
+        setBookings(bookings.map(b => b.id === bookingId ? updatedBooking : b));
+
+        const newSlots = availableSlots.filter(s => s.id !== slotId);
+        setAvailableSlots(newSlots);
+
+        updateBookingDB(updatedBooking);
+        updateSettingsDB({ availableSlots: newSlots });
+      };
+
+      const handleCancelBooking = (bookingId) => {
+        const booking = bookings.find(b => b.id === bookingId);
+        if (booking && booking.status === 'confirmed' && booking.slots.length > 0) {
+          const newSlots = [...availableSlots, booking.slots[0]].sort((a, b) => {
+            if (a.date !== b.date) return a.date.localeCompare(b.date);
+            return a.startTime.localeCompare(b.startTime);
+          });
+          setAvailableSlots(newSlots);
+          updateSettingsDB({ availableSlots: newSlots });
+        }
+        const updatedBooking = { ...booking, status: 'cancelled' };
+        setBookings(bookings.map(b => b.id === bookingId ? updatedBooking : b));
+        updateBookingDB(updatedBooking);
+      };
+
+      const isImmersiveWelcome = viewMode === 'visitor' && showWelcome;
+
+      if (isDbLoading) {
+        return (
+          <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+             <div className="flex flex-col items-center">
+                <div className="w-8 h-8 border-4 border-amber-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+                <p className="text-zinc-400 font-sans tracking-[0.2em] uppercase text-xs">Connecting to Kitchen...</p>
+             </div>
+          </div>
+        )
+      }
+
+      return (
+        <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+          {!isImmersiveWelcome && (
+            <nav className="bg-white shadow-sm sticky top-0 z-50">
+              <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Utensils className="w-5 h-5 text-indigo-600" />
+                  <span className="font-semibold text-lg tracking-tight">HUA's KITCHEN</span>
+                </div>
+                <div className="flex bg-slate-100 p-1 rounded-lg">
+                  <button
+                    onClick={() => { setViewMode('visitor'); setShowWelcome(true); }}
+                    className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+                      viewMode === 'visitor' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    Visitor View
+                  </button>
+                  <button
+                    onClick={() => setViewMode('host')}
+                    className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+                      viewMode === 'host' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    Host View
+                  </button>
+                </div>
+              </div>
+            </nav>
+          )}
+
+          {isImmersiveWelcome && (
+            <div className="fixed top-4 right-4 z-50 flex items-center gap-2">
+              {!isMockMode && (
+                 <span className="bg-green-500/90 text-white text-[10px] font-bold px-2 py-1.5 rounded shadow backdrop-blur uppercase tracking-wider border border-green-400 flex items-center">
+                   <span className="w-1.5 h-1.5 bg-white rounded-full mr-1.5 animate-pulse"></span>
+                   Live DB Connected
+                 </span>
+              )}
+              <button 
+                onClick={() => setViewMode('host')} 
+                className="bg-white/80 backdrop-blur text-xs px-4 py-2 rounded-lg shadow-xl text-slate-800 font-sans tracking-wide hover:bg-white transition-colors border border-white"
+              >
+                Switch to Host View
+              </button>
+            </div>
+          )}
+
+          <main className={isImmersiveWelcome ? "" : "max-w-4xl mx-auto px-4 py-8"}>
+            {viewMode === 'visitor' ? (
+              showWelcome ? (
+                <WelcomePage 
+                  images={heroImages} 
+                  news={newsArticles} 
+                  onEnter={() => setShowWelcome(false)} 
+                />
+              ) : (
+                <VisitorDashboard 
+                  availableSlots={availableSlots} 
+                  menuItems={menuItems}
+                  questions={questions}
+                  bookings={bookings}
+                  onBook={handleBook}
+                  updateBooking={handleUpdateBooking}
+                  onHome={() => setShowWelcome(true)}
+                />
+              )
+            ) : (
+              <HostDashboard 
+                bookings={bookings}
+                updateBooking={handleUpdateBooking}
+                onConfirmBooking={handleConfirmBooking}
+                onCancelBooking={handleCancelBooking}
+                availableSlots={availableSlots}
+                setAvailableSlots={wrappedSetAvailableSlots}
+                menuItems={menuItems}
+                setMenuItems={wrappedSetMenuItems}
+                questions={questions}
+                setQuestions={wrappedSetQuestions}
+                heroImages={heroImages}
+                setHeroImages={wrappedSetHeroImages}
+                newsArticles={newsArticles}
+                setNewsArticles={wrappedSetNewsArticles}
+              />
+            )}
+          </main>
+        </div>
+      );
+    }
+
+    function WelcomePage({ images, news, onEnter }) {
+      const [currentImage, setCurrentImage] = useState(0);
+
+      useEffect(() => {
+        if (!images || images.length <= 1) return;
+        const interval = setInterval(() => {
+          setCurrentImage((prev) => (prev + 1) % images.length);
+        }, 5000); 
+        return () => clearInterval(interval);
+      }, [images]);
+
+      return (
+        <div className="bg-[#0a0a0a] min-h-screen text-zinc-50 font-serif selection:bg-zinc-800 selection:text-white">
+          <div className="relative h-screen flex flex-col items-center justify-center overflow-hidden">
+            {images && images.map((img, index) => (
+              <div
+                key={index}
+                className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
+                  index === currentImage ? 'opacity-100' : 'opacity-0'
+                }`}
+                style={{
+                  backgroundImage: `url(${img})`,
+                  backgroundPosition: 'center',
+                  backgroundSize: 'cover'
+                }}
+              />
+            ))}
+            <div className="absolute inset-0 bg-black/50 z-10" />
+
+            <div className="z-20 text-center p-6 max-w-4xl mx-auto flex flex-col items-center w-full">
+              <h1 className="text-3xl sm:text-5xl md:text-6xl tracking-[0.25em] uppercase font-light mb-8 text-white/90 whitespace-nowrap">
+                HUA'S KITCHEN
+              </h1>
+              <div className="w-20 h-px bg-zinc-400/60 mb-8"></div>
+              
+              <div className="flex items-center space-x-6 mb-16 opacity-80">
+                <Flower2 className="w-8 h-8 text-transparent stroke-white stroke-[1px] hover:opacity-100 transition-opacity" />
+                <Flower2 className="w-10 h-10 text-transparent stroke-white stroke-[1px] hover:opacity-100 transition-opacity scale-110" />
+                <Flower2 className="w-8 h-8 text-transparent stroke-white stroke-[1px] hover:opacity-100 transition-opacity" />
+              </div>
+
+              <button
+                onClick={onEnter}
+                className="group relative px-10 py-4 bg-transparent border border-zinc-100/40 hover:bg-white hover:text-black hover:border-white transition-all duration-500 overflow-hidden"
+              >
+                <span className="relative z-10 tracking-[0.2em] uppercase text-xs md:text-sm font-medium">
+                  Reserve a Seat
+                </span>
+              </button>
+            </div>
+
+            <div 
+              className="absolute bottom-12 z-20 animate-bounce cursor-pointer opacity-70 hover:opacity-100 transition-opacity" 
+              onClick={() => window.scrollTo({ top: window.innerHeight, behavior: 'smooth' })}
+            >
+              <ArrowDown className="w-6 h-6 text-white" />
+            </div>
+          </div>
+
+          <div className="bg-[#f9f8f6] text-zinc-900 min-h-[50vh] py-32 px-6 sm:px-12">
+            <div className="max-w-7xl mx-auto">
+              <div className="text-center mb-24">
+                <h2 className="text-3xl md:text-4xl tracking-[0.2em] uppercase font-light text-zinc-800">The Journal</h2>
+                <div className="w-12 h-[2px] bg-amber-700/60 mx-auto mt-8"></div>
+              </div>
+
+              {news.length === 0 ? (
+                <p className="text-center text-zinc-500 tracking-widest uppercase text-sm">No recent updates.</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 md:gap-12">
+                  {news.map(item => (
+                    <article 
+                      key={item.id} 
+                      className="group flex flex-col bg-white overflow-hidden hover:shadow-2xl transition-all duration-700 border border-zinc-100"
+                    >
+                      <div className="aspect-[4/3] w-full overflow-hidden bg-zinc-100 relative">
+                        {item.imageUrl ? (
+                          <img 
+                            src={item.imageUrl} 
+                            alt={item.title} 
+                            className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" 
+                          />
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center text-zinc-300">
+                            <ImageIcon className="w-8 h-8 mb-2 opacity-50" />
+                            <span className="text-xs uppercase tracking-widest opacity-50">No Image</span>
+                          </div>
+                        )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+                      </div>
+                      
+                      <div className="p-8 sm:p-10 flex flex-col flex-1">
+                        <time className="text-[10px] tracking-[0.25em] text-amber-700 uppercase block mb-4 font-sans font-semibold">
+                          {format(parse(item.date, 'yyyy-MM-dd', new Date()), 'MMMM d, yyyy')}
+                        </time>
+                        <h3 className="text-xl sm:text-2xl font-light text-zinc-900 tracking-wide mb-4 line-clamp-2">
+                          {item.title}
+                        </h3>
+                        <div className="text-zinc-500 font-sans text-sm font-light leading-relaxed line-clamp-3">
+                          {item.content}
+                        </div>
+                        <div className="mt-8 pt-6 border-t border-zinc-100">
+                           <span className="text-xs uppercase tracking-[0.2em] font-medium text-zinc-400 group-hover:text-amber-700 transition-colors duration-300">Read More &rarr;</span>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function VisitorDashboard({ availableSlots, menuItems, questions, bookings, onBook, updateBooking, onHome }) {
+      const [activeTab, setActiveTab] = useState('new'); 
+
+      return (
+        <div className="space-y-6">
+          <div className="flex space-x-1 bg-slate-100 p-1 rounded-xl w-fit mb-6">
+            <button
+              onClick={onHome}
+              className="px-4 py-2 text-sm font-medium rounded-lg transition-all text-slate-600 hover:text-slate-900"
+            >
+              <div className="flex items-center">
+                <Home className="w-4 h-4 mr-2" />
+                Home
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('my_bookings')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                activeTab === 'my_bookings' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <div className="flex items-center">
+                <List className="w-4 h-4 mr-2" />
+                My Visits
+              </div>
+            </button>
+          </div>
+
+          <div className="animate-in fade-in duration-300">
+            {activeTab === 'new' && (
+              <VisitorFlow 
+                availableSlots={availableSlots} 
+                menuItems={menuItems}
+                questions={questions}
+                bookings={bookings}
+                onBook={onBook}
+              />
+            )}
+            {activeTab === 'my_bookings' && (
+              <VisitorBookings 
+                bookings={bookings} 
+                updateBooking={updateBooking}
+                availableSlots={availableSlots}
+                menuItems={menuItems}
+              />
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function VisitorBookings({ bookings, updateBooking, availableSlots, menuItems }) {
+      const [rescheduleId, setRescheduleId] = useState(null);
+      const [newSlots, setNewSlots] = useState([]);
+
+      const handleStartReschedule = (booking) => {
+        setRescheduleId(booking.id);
+        setNewSlots(booking.slots);
+      };
+
+      const handleConfirmReschedule = (booking) => {
+        updateBooking({
+          ...booking,
+          slots: newSlots,
+          status: 'pending' 
+        });
+        setRescheduleId(null);
+      };
+
+      if (bookings.length === 0) {
+        return (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
+             <p className="text-slate-500">You have no visit requests yet.</p>
+          </div>
+        );
+      }
+
+      return (
+        <div className="space-y-6">
+          {bookings.map(booking => {
+            const isRescheduling = rescheduleId === booking.id;
+            const menuName = booking.menuChoice === 'custom' ? 'Custom Activity / Menu' : (menuItems.find(m => m.id === booking.menuChoice)?.name || 'None');
+
+            return (
+              <div key={booking.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
+                <div className="flex justify-between items-start mb-4 border-b border-slate-100 pb-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-800">Visit for {booking.visitorName}</h3>
+                    <span className="text-sm text-slate-500">Requested on {format(parse(booking.createdAt, "yyyy-MM-dd'T'HH:mm:ss.SSSX", new Date()), 'MMM d, yyyy')}</span>
+                  </div>
+                  <div>
+                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wide
+                      ${booking.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 
+                        booking.status === 'confirmed' ? 'bg-green-100 text-green-700' : 
+                        'bg-red-100 text-red-700'}
+                    `}>
+                      {booking.status}
+                    </span>
+                  </div>
+                </div>
+
+                {!isRescheduling ? (
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-700 mb-2">Requested Times</h4>
+                      <ul className="space-y-2">
+                        {booking.slots.map(slot => (
+                          <li key={slot.id} className="text-sm bg-slate-50 p-2 rounded border border-slate-100">
+                             <span className="font-medium">{format(parse(slot.date, 'yyyy-MM-dd', new Date()), 'MMM d, yyyy')}</span> at {slot.startTime}
+                          </li>
+                        ))}
+                      </ul>
+                      {booking.status !== 'rejected' && (
+                        <button 
+                          onClick={() => handleStartReschedule(booking)}
+                          className="mt-3 text-sm text-indigo-600 font-medium flex items-center hover:underline"
+                        >
+                          <Edit className="w-4 h-4 mr-1" /> Change Times (Reschedule)
+                        </button>
+                      )}
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-slate-700 mb-2">Details</h4>
+                      <p className="text-sm text-slate-600 mb-1"><span className="font-medium">Menu/Plan:</span> {menuName}</p>
+                      {booking.menuChoice === 'custom' && (
+                        <p className="text-sm text-slate-600 italic bg-slate-50 p-2 rounded border border-slate-100 mt-2">"{booking.customProposal}"</p>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="animate-in fade-in slide-in-from-top-2">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-lg font-bold text-slate-800">Select New Times</h4>
+                      <button onClick={() => setRescheduleId(null)} className="text-sm text-slate-500 hover:text-slate-800 bg-slate-100 px-3 py-1 rounded">Cancel</button>
+                    </div>
+                    <CalendarPicker 
+                      mode="visitor"
+                      availableSlots={availableSlots} 
+                      confirmedBookings={bookings.filter(b => b.status === 'confirmed')}
+                      selectedSlots={newSlots} 
+                      onSlotToggle={(slot) => {
+                        setNewSlots(prev => {
+                          const exists = prev.find(s => s.id === slot.id);
+                          if (exists) return prev.filter(s => s.id !== slot.id);
+                          return [...prev, slot];
+                        });
+                      }} 
+                    />
+                    <div className="mt-6 flex justify-end">
+                      <button
+                        onClick={() => handleConfirmReschedule(booking)}
+                        disabled={newSlots.length === 0}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
+                      >
+                        Submit New Times
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function VisitorFlow({ availableSlots, menuItems, questions, bookings, onBook }) {
+      const [step, setStep] = useState(1); 
+      const [selectedSlots, setSelectedSlots] = useState([]);
+      const [visitorName, setVisitorName] = useState('');
+      const [answers, setAnswers] = useState({});
+      const [selectedMenu, setSelectedMenu] = useState('');
+      const [customProposal, setCustomProposal] = useState('');
+
+      const handleBack = () => setStep(step - 1);
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        const newBooking = {
+          id: `booking-${Date.now()}`,
+          visitorName,
+          slots: selectedSlots,
+          answers,
+          menuChoice: selectedMenu,
+          customProposal: selectedMenu === 'custom' ? customProposal : '',
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+        };
+        onBook(newBooking);
+        setStep(3);
+      };
+
+      return (
+        <div className="space-y-6">
+          {step < 3 && (
+            <div className="mb-8">
+              <div className="flex items-center justify-between relative">
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-200 -z-10 rounded-full"></div>
+                <div 
+                  className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-indigo-600 -z-10 rounded-full transition-all duration-300"
+                  style={{ width: step === 1 ? '50%' : '100%' }}
+                ></div>
+                
+                <div className={`flex flex-col items-center ${step >= 1 ? 'text-indigo-600' : 'text-slate-400'}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm bg-white border-2 ${step >= 1 ? 'border-indigo-600' : 'border-slate-300'}`}>1</div>
+                  <span className="text-xs mt-2 font-medium bg-slate-50 px-1">Select Time</span>
+                </div>
+                <div className={`flex flex-col items-center ${step >= 2 ? 'text-indigo-600' : 'text-slate-400'}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm bg-white border-2 ${step >= 2 ? 'border-indigo-600' : 'border-slate-300'}`}>2</div>
+                  <span className="text-xs mt-2 font-medium bg-slate-50 px-1">Details & Menu</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 1 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 sm:p-6">
+              <div className="mb-6">
+                <h2 className="text-2xl font-bold text-slate-800">Visit your friend</h2>
+                <p className="text-slate-500 mt-1">Select one or more available time slots to request a visit.</p>
+              </div>
+              
+              <CalendarPicker 
+                mode="visitor"
+                availableSlots={availableSlots} 
+                confirmedBookings={bookings.filter(b => b.status === 'confirmed')}
+                selectedSlots={selectedSlots} 
+                onSlotToggle={(slot) => {
+                  setSelectedSlots(prev => {
+                    const exists = prev.find(s => s.id === slot.id);
+                    if (exists) return prev.filter(s => s.id !== slot.id);
+                    return [...prev, slot];
+                  });
+                }} 
+              />
+
+              <div className="mt-8 flex justify-end">
+                <button
+                  onClick={() => setStep(2)}
+                  disabled={selectedSlots.length === 0}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                >
+                  Next Step
+                  <ChevronRight className="w-4 h-4 ml-2" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 sm:p-6">
+              <button type="button" onClick={handleBack} className="text-sm text-slate-500 hover:text-indigo-600 mb-6 flex items-center transition-colors">
+                <ChevronLeft className="w-4 h-4 mr-1" /> Back to Calendar
+              </button>
+
+              <div className="mb-6">
+                <h2 className="text-2xl font-bold text-slate-800">Almost there!</h2>
+                <p className="text-slate-500 mt-1">Please provide your details and choose a menu for your selected times.</p>
+              </div>
+
+              <div className="bg-slate-50 rounded-xl p-4 mb-8 border border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center">
+                  <Clock className="w-4 h-4 mr-2 text-indigo-500" />
+                  Requested Times ({selectedSlots.length})
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {selectedSlots.map(slot => (
+                    <div key={slot.id} className="bg-white px-3 py-1.5 rounded-md text-sm border border-slate-200 shadow-sm flex items-center">
+                      <span className="font-medium mr-2">{format(parse(slot.date, 'yyyy-MM-dd', new Date()), 'MMM d, yyyy')}</span>
+                      <span className="text-slate-500">{slot.startTime} - {slot.endTime}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Your Name</label>
+                  <input
+                    required
+                    type="text"
+                    value={visitorName}
+                    onChange={(e) => setVisitorName(e.target.value)}
+                    className="w-full rounded-lg border-slate-300 border px-4 py-2.5 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all"
+                    placeholder="Enter your name"
+                  />
+                </div>
+
+                {questions.length > 0 && (
+                  <div className="pt-4 border-t border-slate-100 space-y-6">
+                    <h3 className="text-lg font-semibold text-slate-800 flex items-center">
+                      <MessageSquare className="w-5 h-5 mr-2 text-indigo-500" />
+                      A few questions from your host
+                    </h3>
+                    {questions.map(q => (
+                      <div key={q.id}>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">{q.text}</label>
+                        {q.type === 'select' ? (
+                          <select
+                            required
+                            value={answers[q.id] || ''}
+                            onChange={(e) => setAnswers({...answers, [q.id]: e.target.value})}
+                            className="w-full rounded-lg border-slate-300 border px-4 py-2.5 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all bg-white"
+                          >
+                            <option value="" disabled>Select an option</option>
+                            {q.options?.map(opt => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <textarea
+                            required
+                            value={answers[q.id] || ''}
+                            onChange={(e) => setAnswers({...answers, [q.id]: e.target.value})}
+                            className="w-full rounded-lg border-slate-300 border px-4 py-2.5 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all min-h-[80px]"
+                            placeholder="Your answer..."
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {menuItems.length > 0 && (
+                  <div className="pt-4 border-t border-slate-100">
+                    <h3 className="text-lg font-semibold text-slate-800 flex items-center mb-4">
+                      <Utensils className="w-5 h-5 mr-2 text-indigo-500" />
+                      Choose a Menu Course or Activity
+                    </h3>
+                    <div className="grid sm:grid-cols-2 gap-4 mb-4">
+                      {menuItems.map(menu => (
+                        <div 
+                          key={menu.id}
+                          onClick={() => setSelectedMenu(menu.id)}
+                          className={`cursor-pointer rounded-xl border-2 p-4 transition-all ${
+                            selectedMenu === menu.id 
+                              ? 'border-indigo-600 bg-indigo-50/50' 
+                              : 'border-slate-200 hover:border-indigo-200 bg-white'
+                          }`}
+                        >
+                          <div className="flex justify-between items-start mb-2">
+                            <h4 className="font-semibold text-slate-900">{menu.name}</h4>
+                            {selectedMenu === menu.id && <CheckCircle2 className="w-5 h-5 text-indigo-600 shrink-0" />}
+                          </div>
+                          <p className="text-sm text-slate-600 mb-3">{menu.description}</p>
+                          <p className="text-xs font-medium text-slate-500 bg-slate-100 inline-block px-2 py-1 rounded">{menu.price}</p>
+                        </div>
+                      ))}
+
+                      <div 
+                        onClick={() => setSelectedMenu('custom')}
+                        className={`cursor-pointer rounded-xl border-2 p-4 transition-all ${
+                          selectedMenu === 'custom'
+                            ? 'border-indigo-600 bg-indigo-50/50' 
+                            : 'border-slate-200 hover:border-indigo-200 bg-white'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start mb-2">
+                          <h4 className="font-semibold text-slate-900">Custom / Propose Activity</h4>
+                          {selectedMenu === 'custom' && <CheckCircle2 className="w-5 h-5 text-indigo-600 shrink-0" />}
+                        </div>
+                        <p className="text-sm text-slate-600">Have something specific in mind? Tell us what you want to eat or do together!</p>
+                      </div>
+                    </div>
+
+                    {selectedMenu === 'custom' && (
+                      <div className="animate-in fade-in slide-in-from-top-2">
+                        <textarea
+                          required
+                          value={customProposal}
+                          onChange={(e) => setCustomProposal(e.target.value)}
+                          className="w-full rounded-lg border-slate-300 border px-4 py-3 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all min-h-[100px]"
+                          placeholder="e.g., Let's order pizza and play Monopoly! Or let's make tacos together!"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-8 pt-6 border-t border-slate-100">
+                <button
+                  type="submit"
+                  disabled={!visitorName || questions.some(q => !answers[q.id]) || (menuItems.length > 0 && !selectedMenu) || (selectedMenu === 'custom' && !customProposal)}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3.5 rounded-xl font-bold text-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-indigo-200"
+                >
+                  Submit Request
+                </button>
+              </div>
+            </form>
+          )}
+
+          {step === 3 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center animate-in zoom-in-95 duration-300">
+              <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                <CheckCircle2 className="w-10 h-10 text-green-600" />
+              </div>
+              <h2 className="text-3xl font-bold text-slate-800 mb-2">Request Sent!</h2>
+              <p className="text-slate-600 mb-8 max-w-md mx-auto">
+                Your host has been notified of your requested times. They will review it and confirm the schedule soon.
+              </p>
+              
+              <div className="bg-slate-50 rounded-xl p-6 text-left max-w-md mx-auto mb-8 border border-slate-100">
+                <h3 className="font-semibold text-slate-800 mb-4 border-b pb-2">Booking Summary</h3>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Name</span>
+                    <span className="font-medium">{visitorName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Menu/Plan</span>
+                    <span className="font-medium text-right ml-4">
+                      {selectedMenu === 'custom' ? 'Custom Activity' : (menuItems.find(m => m.id === selectedMenu)?.name || 'None')}
+                    </span>
+                  </div>
+                  <div className="pt-2">
+                    <span className="text-slate-500 block mb-1">Requested Times</span>
+                    <ul className="space-y-1">
+                      {selectedSlots.map(s => (
+                         <li key={s.id} className="font-medium text-slate-700 text-right">
+                           {format(parse(s.date, 'yyyy-MM-dd', new Date()), 'MMM d')} at {s.startTime}
+                         </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  setStep(1);
+                  setSelectedSlots([]);
+                  setVisitorName('');
+                  setAnswers({});
+                  setSelectedMenu('');
+                }}
+                className="text-indigo-600 font-medium hover:underline"
+              >
+                Make another request
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function HostDashboard({ bookings, updateBooking, onConfirmBooking, onCancelBooking, availableSlots, setAvailableSlots, menuItems, setMenuItems, questions, setQuestions, heroImages, setHeroImages, newsArticles, setNewsArticles }) {
+      const [activeTab, setActiveTab] = useState('requests'); 
+
+      return (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900">Host Dashboard</h1>
+              <p className="text-slate-500 mt-1">Manage your availability, menus, and incoming visit requests.</p>
+            </div>
+          </div>
+
+          <div className="flex space-x-1 bg-slate-100 p-1 rounded-xl w-fit mb-6 overflow-x-auto max-w-full">
+            <button
+              onClick={() => setActiveTab('requests')}
+              className={`whitespace-nowrap px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                activeTab === 'requests' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <div className="flex items-center">
+                <User className="w-4 h-4 mr-2" />
+                Requests
+                {bookings.filter(b => b.status === 'pending').length > 0 && (
+                  <span className="ml-2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    {bookings.filter(b => b.status === 'pending').length}
+                  </span>
+                )}
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('slots')}
+              className={`whitespace-nowrap px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                activeTab === 'slots' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <div className="flex items-center">
+                <CalendarIcon className="w-4 h-4 mr-2" />
+                Manage Availability
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`whitespace-nowrap px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                activeTab === 'settings' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <div className="flex items-center">
+                <Settings className="w-4 h-4 mr-2" />
+                Menu & Questions
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('content')}
+              className={`whitespace-nowrap px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                activeTab === 'content' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <div className="flex items-center">
+                <ImageIcon className="w-4 h-4 mr-2" />
+                Home Page Content
+              </div>
+            </button>
+          </div>
+
+          <div className="animate-in fade-in duration-300">
+            {activeTab === 'requests' && (
+              <RequestsManager 
+                bookings={bookings} 
+                updateBooking={updateBooking} 
+                onConfirmBooking={onConfirmBooking}
+                menuItems={menuItems} 
+                questions={questions} 
+              />
+            )}
+            {activeTab === 'slots' && (
+              <AvailabilityManager 
+                availableSlots={availableSlots} 
+                setAvailableSlots={setAvailableSlots} 
+                bookings={bookings}
+                onCancelBooking={onCancelBooking}
+              />
+            )}
+            {activeTab === 'settings' && (
+              <SettingsManager 
+                menuItems={menuItems} 
+                setMenuItems={setMenuItems} 
+                questions={questions} 
+                setQuestions={setQuestions} 
+              />
+            )}
+            {activeTab === 'content' && (
+              <ContentManager 
+                heroImages={heroImages}
+                setHeroImages={setHeroImages}
+                newsArticles={newsArticles}
+                setNewsArticles={setNewsArticles}
+              />
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function RequestsManager({ bookings, updateBooking, onConfirmBooking, menuItems, questions }) {
+      const pending = bookings.filter(b => b.status === 'pending');
+      const confirmed = bookings.filter(b => b.status === 'confirmed');
+
+      return (
+        <div className="space-y-8">
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 mb-4 flex items-center">
+              New Requests
+              {pending.length > 0 && <span className="ml-3 bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded-full">{pending.length}</span>}
+            </h2>
+            {pending.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center">
+                <p className="text-slate-500">No pending requests right now.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {pending.map(booking => (
+                  <RequestCard 
+                    key={booking.id} 
+                    booking={booking} 
+                    menuItems={menuItems} 
+                    questions={questions} 
+                    updateBooking={updateBooking} 
+                    onConfirmBooking={onConfirmBooking} 
+                    isPending={true} 
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 mb-4">Confirmed Visits</h2>
+            {confirmed.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center">
+                <p className="text-slate-500">No confirmed visits yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {confirmed.map(booking => (
+                  <RequestCard 
+                    key={booking.id} 
+                    booking={booking} 
+                    menuItems={menuItems} 
+                    questions={questions} 
+                    updateBooking={updateBooking} 
+                    onConfirmBooking={onConfirmBooking} 
+                    isPending={false} 
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function RequestCard({ booking, menuItems, questions, updateBooking, onConfirmBooking, isPending }) {
+      const [confirmSlotId, setConfirmSlotId] = useState(null);
+      const [eventName, setEventName] = useState(`${booking.visitorName}'s Visit`);
+
+      const menuName = booking.menuChoice === 'custom' 
+        ? 'Custom Activity' 
+        : (menuItems.find(m => m.id === booking.menuChoice)?.name || 'None');
+
+      return (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6 relative overflow-hidden transition-all hover:shadow-md">
+          <div className={`absolute left-0 top-0 bottom-0 w-1 ${isPending ? 'bg-yellow-400' : 'bg-green-500'}`}></div>
+          
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">{booking.visitorName}</h3>
+              <p className="text-xs text-slate-500">Requested on {format(parse(booking.createdAt, "yyyy-MM-dd'T'HH:mm:ss.SSSX", new Date()), 'MMM d, yyyy')}</p>
+            </div>
+            {!isPending && (
+               <span className="bg-green-100 text-green-700 text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wide">
+                 Confirmed
+               </span>
+            )}
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div>
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Menu / Plan</h4>
+                <p className="text-sm font-medium text-slate-800">{menuName}</p>
+                {booking.menuChoice === 'custom' && (
+                  <p className="text-sm mt-1 bg-slate-50 p-2 rounded italic text-slate-600 border border-slate-100">"{booking.customProposal}"</p>
+                )}
+              </div>
+              
+              {Object.keys(booking.answers).length > 0 && (
+                <div>
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Questionnaire</h4>
+                  <div className="space-y-2">
+                    {Object.entries(booking.answers).map(([qId, answer]) => {
+                      const qText = questions.find(q => q.id === qId)?.text || 'Question';
+                      return (
+                        <div key={qId} className="text-sm">
+                          <span className="block text-slate-500 text-xs">{qText}</span>
+                          <span className="font-medium text-slate-800">{answer}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Requested Times</h4>
+              <div className="space-y-2">
+                {booking.slots.map(slot => (
+                  <div key={slot.id} className="p-3 bg-slate-50 border border-slate-100 rounded-lg">
+                    <div className="font-medium text-sm text-slate-800 mb-2">
+                      {format(parse(slot.date, 'yyyy-MM-dd', new Date()), 'EEEE, MMM d, yyyy')} <br/>
+                      <span className="text-indigo-600">{slot.startTime} - {slot.endTime}</span>
+                    </div>
+                    
+                    {isPending && (
+                      <div>
+                        {confirmSlotId === slot.id ? (
+                          <div className="mt-3 p-3 bg-white border border-indigo-100 rounded-md shadow-sm animate-in fade-in zoom-in-95">
+                            <label className="block text-xs font-bold text-slate-700 mb-1">Calendar Event Name</label>
+                            <input 
+                              type="text" 
+                              value={eventName} 
+                              onChange={e => setEventName(e.target.value)}
+                              className="w-full border-slate-200 border rounded px-2 py-1.5 text-sm outline-none focus:border-indigo-500 mb-3"
+                              placeholder="e.g. Dinner with Alice"
+                            />
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={() => onConfirmBooking(booking.id, slot.id, eventName)} 
+                                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-1.5 rounded transition-colors"
+                              >
+                                Confirm
+                              </button>
+                              <button 
+                                onClick={() => setConfirmSlotId(null)} 
+                                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold py-1.5 rounded transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button 
+                            onClick={() => setConfirmSlotId(slot.id)}
+                            className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold py-1.5 rounded border border-indigo-100 transition-colors"
+                          >
+                            Select & Confirm
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {isPending && (
+                 <div className="mt-4 flex justify-end">
+                   <button 
+                     onClick={() => updateBooking({...booking, status: 'rejected'})}
+                     className="text-xs text-red-500 hover:text-red-700 hover:underline font-medium flex items-center"
+                   >
+                     <XCircle className="w-3 h-3 mr-1" /> Reject entire request
+                   </button>
+                 </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function ContentManager({ heroImages, setHeroImages, newsArticles, setNewsArticles }) {
+      const [newImageUrl, setNewImageUrl] = useState('');
+      const fileInputRef = useRef(null);
+      
+      const handleAddImage = (e) => {
+        e.preventDefault();
+        if (newImageUrl.trim()) {
+          setHeroImages([...heroImages, newImageUrl.trim()]);
+          setNewImageUrl('');
+        }
+      };
+      
+      const handleRemoveImage = (index) => {
+        setHeroImages(heroImages.filter((_, i) => i !== index));
+      };
+
+      const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setHeroImages([...heroImages, reader.result]);
+        };
+        reader.readAsDataURL(file);
+        e.target.value = null; 
+      };
+
+      const [newNews, setNewNews] = useState({ title: '', content: '' });
+      const [isGenerating, setIsGenerating] = useState(false);
+      
+      const fetchWithRetry = async (url, options, retries = 3, delay = 1000) => {
+        try {
+          const res = await fetch(url, options);
+          if (!res.ok && res.status === 429 && retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return fetchWithRetry(url, options, retries - 1, delay * 2);
+          }
+          return res;
+        } catch (err) {
+          if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return fetchWithRetry(url, options, retries - 1, delay * 2);
+          }
+          throw err;
+        }
+      };
+
+      const handleAddNews = async (e) => {
+        e.preventDefault();
+        if (!newNews.title || !newNews.content) return;
+        
+        setIsGenerating(true);
+        let generatedImageUrl = '';
+
+        try {
+          const payload = {
+              contents: [{
+                  role: 'user',
+                  parts: [{ text: `High quality editorial food, lifestyle, or interior photography for an article titled "${newNews.title}". Context: ${newNews.content}. Michelin star aesthetic, moody, elegant, minimalist.` }]
+              }],
+              generationConfig: {
+                  responseModalities: ['IMAGE'],
+                  imageConfig: { aspectRatio: "4:3" }
+              },
+          };
+          const apiKey = "";
+          const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=${apiKey}`;
+          
+          const response = await fetchWithRetry(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+          });
+          
+          const result = await response.json();
+          const part = result?.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+          
+          if (part) {
+            generatedImageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+          }
+        } catch (error) {
+           console.log("Image generation skipped or failed.");
+        }
+
+        const newArticle = {
+          id: `news-${Date.now()}`,
+          title: newNews.title,
+          content: newNews.content,
+          date: format(new Date(), 'yyyy-MM-dd'),
+          imageUrl: generatedImageUrl
+        };
+        
+        setNewsArticles([newArticle, ...newsArticles]);
+        setNewNews({ title: '', content: '' });
+        setIsGenerating(false);
+      };
+      
+      const handleRemoveNews = (id) => {
+        setNewsArticles(newsArticles.filter(n => n.id !== id));
+      };
+
+      return (
+        <div className="grid lg:grid-cols-2 gap-8">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+            <div className="p-4 bg-slate-50 border-b border-slate-200">
+              <h3 className="font-bold text-slate-800 flex items-center">
+                <ImageIcon className="w-5 h-5 mr-2 text-indigo-500" />
+                Welcome Page Carousel
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">Provide image URLs or upload local images for the background.</p>
+            </div>
+            
+            <div className="p-4 flex-1 space-y-4 max-h-[400px] overflow-y-auto">
+              {heroImages.map((imgUrl, idx) => (
+                <div key={idx} className="flex items-center justify-between p-2 rounded-lg border border-slate-200 bg-slate-50">
+                  <div className="flex items-center space-x-3 overflow-hidden w-full pr-4">
+                    <img src={imgUrl} alt={`Hero ${idx}`} className="w-12 h-12 object-cover rounded bg-slate-200 shrink-0" />
+                    <span className="text-xs text-slate-500 truncate inline-block w-full">
+                      {imgUrl.startsWith('data:image') ? 'Local Image File' : imgUrl}
+                    </span>
+                  </div>
+                  <button onClick={() => handleRemoveImage(idx)} className="text-slate-400 hover:text-red-500 p-2 shrink-0">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              {heroImages.length === 0 && <p className="text-sm text-slate-500 text-center py-4">No images added.</p>}
+            </div>
+
+            <div className="p-4 border-t border-slate-100 bg-slate-50 space-y-3">
+              <form onSubmit={handleAddImage} className="flex gap-2">
+                <input type="url" placeholder="Paste image URL here..." value={newImageUrl} onChange={e => setNewImageUrl(e.target.value)} className="flex-1 text-sm rounded border px-3 py-2 outline-none focus:border-indigo-500" />
+                <button type="submit" disabled={!newImageUrl.trim()} className="bg-slate-800 text-white text-sm px-4 py-2 rounded font-medium hover:bg-slate-900 disabled:opacity-50 transition-colors">Add URL</button>
+              </form>
+
+              <div className="relative flex items-center gap-2 py-1">
+                <div className="flex-grow border-t border-slate-200"></div>
+                <span className="text-xs text-slate-400 font-medium">OR</span>
+                <div className="flex-grow border-t border-slate-200"></div>
+              </div>
+
+              <div>
+                <input type="file" accept="image/*" onChange={handleFileUpload} ref={fileInputRef} className="hidden" />
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full bg-white border-2 border-indigo-100 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 text-sm py-2 rounded-lg font-bold transition-colors flex items-center justify-center">
+                  <ImageIcon className="w-4 h-4 mr-2" />
+                  Upload Local Image
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-slate-800 flex items-center">
+                  <Newspaper className="w-5 h-5 mr-2 text-indigo-500" />
+                  The Journal (News)
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">Post your latest news. AI will generate an image cover!</p>
+              </div>
+            </div>
+            
+            <div className="p-4 flex-1 space-y-4 max-h-[400px] overflow-y-auto">
+              {newsArticles.map((article) => (
+                <div key={article.id} className="p-3 rounded-lg border border-slate-200 bg-slate-50 relative pr-10 flex gap-4">
+                  {article.imageUrl && (
+                    <img src={article.imageUrl} alt="thumbnail" className="w-16 h-16 object-cover rounded-md border border-slate-200 shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-bold text-sm text-slate-800 mb-1 truncate">{article.title}</h4>
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">{format(parse(article.date, 'yyyy-MM-dd', new Date()), 'MMM d, yyyy')}</p>
+                    <p className="text-xs text-slate-600 line-clamp-2">{article.content}</p>
+                  </div>
+                  <button onClick={() => handleRemoveNews(article.id)} className="absolute top-3 right-3 text-slate-400 hover:text-red-500 p-1">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              {newsArticles.length === 0 && <p className="text-sm text-slate-500 text-center py-4">No articles added.</p>}
+            </div>
+
+            <div className="p-4 border-t border-slate-100 bg-slate-50 space-y-3 relative">
+              {isGenerating && (
+                <div className="absolute inset-0 z-10 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-b-xl border-t border-slate-100">
+                  <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin mb-2"></div>
+                  <p className="text-xs font-bold text-indigo-700 tracking-wider uppercase">AI is painting the cover...</p>
+                </div>
+              )}
+              
+              <form onSubmit={handleAddNews} className="space-y-3">
+                <input required type="text" placeholder="Article Title" value={newNews.title} onChange={e => setNewNews({...newNews, title: e.target.value})} className="w-full text-sm rounded border px-3 py-2 outline-none focus:border-indigo-500" />
+                <textarea required placeholder="Article Content..." value={newNews.content} onChange={e => setNewNews({...newNews, content: e.target.value})} className="w-full text-sm rounded border px-3 py-2 outline-none focus:border-indigo-500 h-24" />
+                <button type="submit" disabled={isGenerating} className="w-full bg-slate-800 text-white text-sm px-4 py-2 rounded font-medium hover:bg-slate-900 transition-colors disabled:opacity-50">Publish Article</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function SettingsManager({ menuItems, setMenuItems, questions, setQuestions }) {
+      const [newMenu, setNewMenu] = useState({ name: '', description: '', price: '' });
+      const addMenu = (e) => {
+        e.preventDefault();
+        if (!newMenu.name) return;
+        setMenuItems([...menuItems, { ...newMenu, id: `m-${Date.now()}` }]);
+        setNewMenu({ name: '', description: '', price: '' });
+      };
+      const removeMenu = (id) => setMenuItems(menuItems.filter(m => m.id !== id));
+
+      const [newQuestion, setNewQuestion] = useState({ text: '', type: 'text', optionsStr: '' });
+      const addQuestion = (e) => {
+        e.preventDefault();
+        if (!newQuestion.text) return;
+        const qToAdd = { id: `q-${Date.now()}`, text: newQuestion.text, type: newQuestion.type };
+        if (newQuestion.type === 'select') {
+          qToAdd.options = newQuestion.optionsStr.split(',').map(s => s.trim()).filter(Boolean);
+          if (qToAdd.options.length === 0) return; 
+        }
+        setQuestions([...questions, qToAdd]);
+        setNewQuestion({ text: '', type: 'text', optionsStr: '' });
+      };
+      const removeQuestion = (id) => setQuestions(questions.filter(q => q.id !== id));
+
+      return (
+        <div className="grid lg:grid-cols-2 gap-8">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+            <div className="p-4 bg-slate-50 border-b border-slate-200">
+              <h3 className="font-bold text-slate-800 flex items-center">
+                <Utensils className="w-5 h-5 mr-2 text-indigo-500" /> Course Menus
+              </h3>
+            </div>
+            <div className="p-4 flex-1 space-y-4">
+              {menuItems.map(menu => (
+                <div key={menu.id} className="relative p-3 rounded-lg border border-slate-200 bg-slate-50/50 pr-10">
+                  <h4 className="font-semibold text-sm">{menu.name}</h4>
+                  <p className="text-xs text-slate-600 mt-1">{menu.description}</p>
+                  {menu.price && <span className="text-[10px] font-medium bg-white px-2 py-0.5 rounded border mt-2 inline-block text-slate-500">{menu.price}</span>}
+                  <button onClick={() => removeMenu(menu.id)} className="absolute top-3 right-3 text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                </div>
+              ))}
+            </div>
+            <div className="p-4 border-t border-slate-100 bg-slate-50">
+              <form onSubmit={addMenu} className="space-y-3">
+                <input required type="text" placeholder="Course Name" value={newMenu.name} onChange={e => setNewMenu({...newMenu, name: e.target.value})} className="w-full text-sm rounded border px-3 py-2 outline-none focus:border-indigo-500" />
+                <textarea placeholder="Description" value={newMenu.description} onChange={e => setNewMenu({...newMenu, description: e.target.value})} className="w-full text-sm rounded border px-3 py-2 outline-none focus:border-indigo-500 h-16" />
+                <input type="text" placeholder="Price/Condition" value={newMenu.price} onChange={e => setNewMenu({...newMenu, price: e.target.value})} className="w-full text-sm rounded border px-3 py-2 outline-none focus:border-indigo-500" />
+                <button type="submit" className="w-full bg-slate-800 text-white text-sm py-2 rounded hover:bg-slate-900">Add Menu</button>
+              </form>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+            <div className="p-4 bg-slate-50 border-b border-slate-200">
+              <h3 className="font-bold text-slate-800 flex items-center">
+                <MessageSquare className="w-5 h-5 mr-2 text-indigo-500" /> Visitor Questionnaire
+              </h3>
+            </div>
+            <div className="p-4 flex-1 space-y-4">
+              {questions.map(q => (
+                <div key={q.id} className="relative p-3 rounded-lg border border-slate-200 bg-slate-50/50 pr-10">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] font-bold uppercase bg-slate-200 px-1.5 py-0.5 rounded">{q.type}</span>
+                    <h4 className="font-semibold text-sm">{q.text}</h4>
+                  </div>
+                  {q.type === 'select' && <p className="text-xs text-slate-500 mt-1">Options: {q.options.join(', ')}</p>}
+                  <button onClick={() => removeQuestion(q.id)} className="absolute top-3 right-3 text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                </div>
+              ))}
+            </div>
+            <div className="p-4 border-t border-slate-100 bg-slate-50">
+              <form onSubmit={addQuestion} className="space-y-3">
+                <input required type="text" placeholder="Question text" value={newQuestion.text} onChange={e => setNewQuestion({...newQuestion, text: e.target.value})} className="w-full text-sm rounded border px-3 py-2 outline-none focus:border-indigo-500" />
+                <select value={newQuestion.type} onChange={e => setNewQuestion({...newQuestion, type: e.target.value})} className="w-full text-sm rounded border px-3 py-2 outline-none focus:border-indigo-500 bg-white">
+                  <option value="text">Text Input</option>
+                  <option value="select">Multiple Choice</option>
+                </select>
+                {newQuestion.type === 'select' && <input required type="text" placeholder="Options (comma separated)" value={newQuestion.optionsStr} onChange={e => setNewQuestion({...newQuestion, optionsStr: e.target.value})} className="w-full text-sm rounded border px-3 py-2 outline-none focus:border-indigo-500" />}
+                <button type="submit" className="w-full bg-slate-800 text-white text-sm py-2 rounded hover:bg-slate-900">Add Question</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function AvailabilityManager({ availableSlots, setAvailableSlots, bookings, onCancelBooking }) {
+      return (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
+          <div className="mb-6 border-b border-slate-100 pb-4">
+            <h2 className="text-xl font-bold text-slate-800">Manage Availability Calendar</h2>
+          </div>
+          <CalendarPicker 
+            mode="host"
+            availableSlots={availableSlots} 
+            confirmedBookings={bookings.filter(b => b.status === 'confirmed')}
+            setAvailableSlots={setAvailableSlots}
+            onCancelBooking={onCancelBooking}
+          />
+        </div>
+      );
+    }
+
+    function CalendarPicker({ mode, availableSlots, confirmedBookings = [], selectedSlots = [], onSlotToggle, setAvailableSlots, onCancelBooking }) {
+      const [currentDate, setCurrentDate] = useState(startOfMonth(new Date()));
+      const [hostSelectedDate, setHostSelectedDate] = useState(null); 
+      const [newTimeStart, setNewTimeStart] = useState('18:00');
+      const [newTimeEnd, setNewTimeEnd] = useState('21:00');
+
+      const nextMonth = () => setCurrentDate(addMonths(currentDate, 1));
+      const prevMonth = () => setCurrentDate(addMonths(currentDate, -1));
+      const daysInMonth = eachDayOfInterval({ start: startOfWeek(startOfMonth(currentDate)), end: endOfWeek(endOfMonth(currentDate)) });
+      const today = startOfDay(new Date());
+      const isVisitor = mode === 'visitor';
+
+      const handleAddSlot = () => {
+        if (!hostSelectedDate) return;
+        const newSlot = { id: `slot-${Date.now()}`, date: hostSelectedDate, startTime: newTimeStart, endTime: newTimeEnd };
+        setAvailableSlots([...availableSlots, newSlot].sort((a, b) => a.startTime.localeCompare(b.startTime)));
+      };
+
+      return (
+        <div className="flex flex-col lg:flex-row gap-6">
+          <div className="flex-1">
+            <div className="flex justify-between items-center mb-6 bg-slate-50 p-2 rounded-xl border border-slate-100">
+              <button onClick={prevMonth} className="p-2 hover:bg-white rounded-lg text-slate-600"><ChevronLeft className="w-5 h-5"/></button>
+              <h3 className="font-bold text-lg text-slate-800">{format(currentDate, 'MMMM yyyy')}</h3>
+              <button onClick={nextMonth} className="p-2 hover:bg-white rounded-lg text-slate-600"><ChevronRight className="w-5 h-5"/></button>
+            </div>
+            
+            <div className="grid grid-cols-7 gap-1 text-center mb-2">
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                <div key={d} className="text-xs font-bold text-slate-400 uppercase">{d}</div>
+              ))}
+            </div>
+            
+            <div className="grid grid-cols-7 gap-1 sm:gap-2">
+              {daysInMonth.map(day => {
+                const dateStr = format(day, 'yyyy-MM-dd');
+                const isCurrentMonth = isSameMonth(day, currentDate);
+                const isPast = isBefore(day, today);
+                
+                const daySlots = availableSlots.filter(s => s.date === dateStr);
+                const dayConfirmed = confirmedBookings.flatMap(b => b.slots.filter(s => s.date === dateStr).map(s => ({...s, eventName: b.eventName, bookingId: b.id})));
+                
+                const isSelectedByHost = !isVisitor && hostSelectedDate === dateStr;
+                const hasVisitorSelectedSlot = isVisitor && selectedSlots.some(s => s.date === dateStr);
+
+                let bgClass = "bg-white border-slate-200";
+                if (!isCurrentMonth) bgClass = "bg-slate-50/50 text-slate-300 border-transparent";
+                else if (isSelectedByHost) bgClass = "bg-indigo-50 border-indigo-400 ring-1 ring-indigo-400 shadow-sm";
+                else if (hasVisitorSelectedSlot) bgClass = "bg-indigo-50 border-indigo-300 shadow-sm";
+                else bgClass = "bg-white hover:border-slate-300 border-slate-200 shadow-sm";
+
+                return (
+                  <div 
+                    key={day.toString()} 
+                    onClick={() => !isVisitor && !isPast && setHostSelectedDate(dateStr)}
+                    className={`min-h-[80px] sm:min-h-[100px] p-1.5 border rounded-xl transition-all flex flex-col ${bgClass} ${!isVisitor && !isPast ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''} ${isPast ? 'opacity-40 cursor-not-allowed bg-slate-50' : ''}`}
+                  >
+                    <div className="flex justify-end mb-1">
+                      <span className={`text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full ${isSameDay(day, today) ? 'bg-indigo-600 text-white' : 'text-slate-600'}`}>
+                        {format(day, 'd')}
+                      </span>
+                    </div>
+                    
+                    <div className="flex flex-col gap-1 flex-1 overflow-y-auto hide-scrollbar">
+                      {isVisitor && (
+                        <>
+                          {dayConfirmed.map(event => (
+                            <div key={event.id} className="text-[10px] sm:text-xs bg-red-50 text-red-600 border border-red-100 px-1.5 py-0.5 rounded truncate font-medium flex items-center" title={event.eventName}>
+                               <div className="w-1.5 h-1.5 rounded-full bg-red-500 mr-1 shrink-0"></div>
+                               {event.eventName}
+                            </div>
+                          ))}
+                          {daySlots.map(slot => {
+                            const isSelected = selectedSlots.some(s => s.id === slot.id);
+                            return (
+                              <button
+                                key={slot.id}
+                                disabled={isPast}
+                                onClick={(e) => { e.stopPropagation(); onSlotToggle(slot); }}
+                                className={`text-[10px] sm:text-xs w-full text-left px-1.5 py-1 rounded border transition-all ${isSelected ? 'bg-indigo-600 text-white border-indigo-600 shadow-md font-bold' : 'bg-indigo-50/80 text-indigo-700 border-indigo-100 hover:bg-indigo-100'}`}
+                              >
+                                {slot.startTime}
+                              </button>
+                            );
+                          })}
+                        </>
+                      )}
+
+                      {!isVisitor && (
+                        <div className="flex flex-col gap-0.5 px-0.5 mt-auto pb-1">
+                          {dayConfirmed.length > 0 && <span className="text-[10px] text-red-600 font-bold bg-red-50 px-1 rounded truncate flex items-center"><div className="w-1.5 h-1.5 rounded-full bg-red-500 mr-1 shrink-0"></div>{dayConfirmed.length} Event</span>}
+                          {daySlots.length > 0 && <span className="text-[10px] text-indigo-600 font-bold bg-indigo-50 px-1 rounded truncate flex items-center"><div className="w-1.5 h-1.5 rounded-full bg-indigo-500 mr-1 shrink-0"></div>{daySlots.length} Slots</span>}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {!isVisitor && hostSelectedDate && (
+            <div className="lg:w-80 shrink-0 bg-slate-50 p-5 rounded-2xl border border-slate-200 h-fit animate-in slide-in-from-right-4 duration-300 shadow-sm sticky top-6">
+              <div className="flex justify-between items-center mb-6">
+                <h4 className="font-bold text-slate-800 text-lg flex items-center">
+                  <CalendarIcon className="w-5 h-5 mr-2 text-indigo-500"/>
+                  {format(parse(hostSelectedDate, 'yyyy-MM-dd', new Date()), 'MMM d, yyyy')}
+                </h4>
+                <button onClick={() => setHostSelectedDate(null)} className="text-slate-400 hover:bg-slate-200 p-1 rounded-full"><XCircle className="w-5 h-5"/></button>
+              </div>
+              
+              <div className="mb-6">
+                <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Confirmed Events</h5>
+                {(() => {
+                  const events = confirmedBookings.flatMap(b => b.slots.filter(s => s.date === hostSelectedDate).map(s => ({...s, eventName: b.eventName, bookingId: b.id})));
+                  if (events.length === 0) return <p className="text-sm text-slate-400 italic">No events planned.</p>;
+                  return (
+                    <div className="space-y-3">
+                      {events.map(event => (
+                        <div key={event.id} className="bg-white border border-red-100 p-3 rounded-xl shadow-sm border-l-4 border-l-red-500">
+                          <p className="text-sm font-bold text-slate-800 mb-0.5">{event.eventName}</p>
+                          <p className="text-xs text-slate-500 flex items-center"><Clock className="w-3 h-3 mr-1"/>{event.startTime} - {event.endTime}</p>
+                          <button onClick={() => onCancelBooking(event.bookingId)} className="mt-3 w-full text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg flex items-center justify-center"><Trash2 className="w-3 h-3 mr-1"/> Release Time</button>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div>
+                <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Available Slots</h5>
+                {(() => {
+                  const slots = availableSlots.filter(s => s.date === hostSelectedDate);
+                  return (
+                    <div className="space-y-2 mb-6">
+                      {slots.length === 0 ? <p className="text-sm text-slate-400 italic mb-2">No slots open.</p> : (
+                        slots.map(slot => (
+                          <div key={slot.id} className="flex justify-between items-center bg-white border border-indigo-100 p-2.5 rounded-xl shadow-sm">
+                            <span className="text-sm font-bold text-indigo-700 flex items-center"><Clock className="w-4 h-4 mr-1.5 text-indigo-400"/>{slot.startTime}</span>
+                            <button onClick={() => setAvailableSlots(availableSlots.filter(s => s.id !== slot.id))} className="text-slate-300 hover:text-red-500 bg-slate-50 hover:bg-red-50 p-1.5 rounded-lg"><Trash2 className="w-4 h-4"/></button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  );
+                })()}
+
+                <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
+                  <h6 className="text-xs font-bold text-indigo-800 mb-3 flex items-center"><Plus className="w-3 h-3 mr-1"/> Add Time Slot</h6>
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="flex-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Start</label>
+                      <input type="time" value={newTimeStart} onChange={e => setNewTimeStart(e.target.value)} className="w-full border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-indigo-500 bg-white shadow-sm" />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">End</label>
+                      <input type="time" value={newTimeEnd} onChange={e => setNewTimeEnd(e.target.value)} className="w-full border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-indigo-500 bg-white shadow-sm" />
+                    </div>
+                  </div>
+                  <button onClick={handleAddSlot} className="w-full bg-indigo-600 text-white text-sm font-bold py-2 rounded-lg hover:bg-indigo-700 shadow-sm">Open Slot</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
