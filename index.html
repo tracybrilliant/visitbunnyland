@@ -280,7 +280,8 @@
 
       const handleCancelBooking = (bookingId) => {
         const booking = bookings.find(b => b.id === bookingId);
-        if (booking && booking.status === 'confirmed' && booking.slots.length > 0) {
+        if (booking && booking.status === 'confirmed' && booking.slots.length > 0 && !booking.isHostEvent) {
+          // If it was a regular visit, restore the slot
           const newSlots = [...availableSlots, booking.slots[0]].sort((a, b) => {
             if (a.date !== b.date) return a.date.localeCompare(b.date);
             return a.startTime.localeCompare(b.startTime);
@@ -291,6 +292,21 @@
         const updatedBooking = { ...booking, status: 'cancelled' };
         setBookings(bookings.map(b => b.id === bookingId ? updatedBooking : b));
         updateBookingDB(updatedBooking);
+      };
+
+      // 📅 主人手动添加“固定活动 (Fixed Event)”逻辑
+      const handleAddHostEvent = (eventData) => {
+        const newEvent = {
+          id: `host-event-${Date.now()}`,
+          visitorName: 'Host',
+          slots: [{ id: `slot-${Date.now()}`, date: eventData.date, startTime: eventData.startTime, endTime: eventData.endTime }],
+          status: 'confirmed',
+          eventName: eventData.eventName,
+          isHostEvent: true, // 区分访客的拜访和主人自己的活动
+          createdAt: new Date().toISOString(),
+        };
+        setBookings([...bookings, newEvent]);
+        updateBookingDB(newEvent);
       };
 
       // 🔐 处理口令提交
@@ -439,6 +455,7 @@
                 updateBooking={handleUpdateBooking}
                 onConfirmBooking={handleConfirmBooking}
                 onCancelBooking={handleCancelBooking}
+                onAddHostEvent={handleAddHostEvent} // 传入新增 Event 方法
                 availableSlots={availableSlots}
                 setAvailableSlots={wrappedSetAvailableSlots}
                 menuItems={menuItems}
@@ -1110,7 +1127,7 @@
       );
     }
 
-    function HostDashboard({ bookings, updateBooking, onConfirmBooking, onCancelBooking, availableSlots, setAvailableSlots, menuItems, setMenuItems, questions, setQuestions, heroImages, setHeroImages, newsArticles, setNewsArticles }) {
+    function HostDashboard({ bookings, updateBooking, onConfirmBooking, onCancelBooking, onAddHostEvent, availableSlots, setAvailableSlots, menuItems, setMenuItems, questions, setQuestions, heroImages, setHeroImages, newsArticles, setNewsArticles }) {
       const [activeTab, setActiveTab] = useState('requests'); 
 
       return (
@@ -1198,6 +1215,7 @@
                 setAvailableSlots={setAvailableSlots} 
                 bookings={bookings}
                 onCancelBooking={onCancelBooking}
+                onAddHostEvent={onAddHostEvent}
               />
             )}
             {activeTab === 'settings' && (
@@ -1223,7 +1241,8 @@
 
     function RequestsManager({ bookings, updateBooking, onConfirmBooking, menuItems, questions }) {
       const pending = bookings.filter(b => b.status === 'pending');
-      const confirmed = bookings.filter(b => b.status === 'confirmed');
+      // Hide Host's own Fixed Events from the traditional Confirmed list to avoid clutter
+      const confirmed = bookings.filter(b => b.status === 'confirmed' && !b.isHostEvent);
 
       return (
         <div className="space-y-8">
@@ -1685,7 +1704,7 @@
       );
     }
 
-    function AvailabilityManager({ availableSlots, setAvailableSlots, bookings, onCancelBooking }) {
+    function AvailabilityManager({ availableSlots, setAvailableSlots, bookings, onCancelBooking, onAddHostEvent }) {
       return (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
           <div className="mb-6 border-b border-slate-100 pb-4">
@@ -1697,16 +1716,20 @@
             confirmedBookings={bookings.filter(b => b.status === 'confirmed')}
             setAvailableSlots={setAvailableSlots}
             onCancelBooking={onCancelBooking}
+            onAddHostEvent={onAddHostEvent}
           />
         </div>
       );
     }
 
-    function CalendarPicker({ mode, availableSlots, confirmedBookings = [], selectedSlots = [], onSlotToggle, setAvailableSlots, onCancelBooking }) {
+    function CalendarPicker({ mode, availableSlots, confirmedBookings = [], selectedSlots = [], onSlotToggle, setAvailableSlots, onCancelBooking, onAddHostEvent }) {
       const [currentDate, setCurrentDate] = useState(startOfMonth(new Date()));
       const [hostSelectedDate, setHostSelectedDate] = useState(null); 
+      
+      const [addMode, setAddMode] = useState('slot'); 
       const [newTimeStart, setNewTimeStart] = useState('18:00');
       const [newTimeEnd, setNewTimeEnd] = useState('21:00');
+      const [newEventName, setNewEventName] = useState('');
 
       const nextMonth = () => setCurrentDate(addMonths(currentDate, 1));
       const prevMonth = () => setCurrentDate(addMonths(currentDate, -1));
@@ -1714,10 +1737,22 @@
       const today = startOfDay(new Date());
       const isVisitor = mode === 'visitor';
 
-      const handleAddSlot = () => {
+      const handleAddAction = () => {
         if (!hostSelectedDate) return;
-        const newSlot = { id: `slot-${Date.now()}`, date: hostSelectedDate, startTime: newTimeStart, endTime: newTimeEnd };
-        setAvailableSlots([...availableSlots, newSlot].sort((a, b) => a.startTime.localeCompare(b.startTime)));
+        
+        if (addMode === 'slot') {
+          const newSlot = { id: `slot-${Date.now()}`, date: hostSelectedDate, startTime: newTimeStart, endTime: newTimeEnd };
+          setAvailableSlots([...availableSlots, newSlot].sort((a, b) => a.startTime.localeCompare(b.startTime)));
+        } else {
+          if (!newEventName.trim()) return alert("Please enter an event name.");
+          onAddHostEvent({
+             date: hostSelectedDate,
+             startTime: newTimeStart,
+             endTime: newTimeEnd,
+             eventName: newEventName.trim()
+          });
+          setNewEventName('');
+        }
       };
 
       return (
@@ -1742,7 +1777,7 @@
                 const isPast = isBefore(day, today);
                 
                 const daySlots = availableSlots.filter(s => s.date === dateStr);
-                const dayConfirmed = confirmedBookings.flatMap(b => b.slots.filter(s => s.date === dateStr).map(s => ({...s, eventName: b.eventName, bookingId: b.id})));
+                const dayConfirmed = confirmedBookings.flatMap(b => b.slots.filter(s => s.date === dateStr).map(s => ({...s, eventName: b.eventName, bookingId: b.id, isHostEvent: b.isHostEvent})));
                 
                 const isSelectedByHost = !isVisitor && hostSelectedDate === dateStr;
                 const hasVisitorSelectedSlot = isVisitor && selectedSlots.some(s => s.date === dateStr);
@@ -1766,14 +1801,16 @@
                     </div>
                     
                     <div className="flex flex-col gap-1 flex-1 overflow-y-auto hide-scrollbar">
+                      
+                      {dayConfirmed.map(event => (
+                        <div key={event.id} className={`text-[9px] sm:text-[10px] px-1 py-0.5 rounded truncate font-medium flex items-center ${event.isHostEvent ? 'bg-amber-50 text-amber-700 border border-amber-100' : 'bg-red-50 text-red-600 border border-red-100'}`} title={`${event.startTime} - ${event.eventName}`}>
+                           <div className={`w-1.5 h-1.5 rounded-full mr-1 shrink-0 ${event.isHostEvent ? 'bg-amber-500' : 'bg-red-500'}`}></div>
+                           {event.startTime} {event.eventName}
+                        </div>
+                      ))}
+
                       {isVisitor && (
                         <>
-                          {dayConfirmed.map(event => (
-                            <div key={event.id} className="text-[10px] sm:text-xs bg-red-50 text-red-600 border border-red-100 px-1.5 py-0.5 rounded truncate font-medium flex items-center" title={event.eventName}>
-                               <div className="w-1.5 h-1.5 rounded-full bg-red-500 mr-1 shrink-0"></div>
-                               {event.eventName}
-                            </div>
-                          ))}
                           {daySlots.map(slot => {
                             const isSelected = selectedSlots.some(s => s.id === slot.id);
                             return (
@@ -1792,7 +1829,6 @@
 
                       {!isVisitor && (
                         <div className="flex flex-col gap-0.5 px-0.5 mt-auto pb-1">
-                          {dayConfirmed.length > 0 && <span className="text-[10px] text-red-600 font-bold bg-red-50 px-1 rounded truncate flex items-center"><div className="w-1.5 h-1.5 rounded-full bg-red-500 mr-1 shrink-0"></div>{dayConfirmed.length} Event</span>}
                           {daySlots.length > 0 && <span className="text-[10px] text-indigo-600 font-bold bg-indigo-50 px-1 rounded truncate flex items-center"><div className="w-1.5 h-1.5 rounded-full bg-indigo-500 mr-1 shrink-0"></div>{daySlots.length} Slots</span>}
                         </div>
                       )}
@@ -1816,15 +1852,17 @@
               <div className="mb-6">
                 <h5 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Confirmed Events</h5>
                 {(() => {
-                  const events = confirmedBookings.flatMap(b => b.slots.filter(s => s.date === hostSelectedDate).map(s => ({...s, eventName: b.eventName, bookingId: b.id})));
+                  const events = confirmedBookings.flatMap(b => b.slots.filter(s => s.date === hostSelectedDate).map(s => ({...s, eventName: b.eventName, bookingId: b.id, isHostEvent: b.isHostEvent})));
                   if (events.length === 0) return <p className="text-sm text-slate-400 italic">No events planned.</p>;
                   return (
                     <div className="space-y-3">
                       {events.map(event => (
-                        <div key={event.id} className="bg-white border border-red-100 p-3 rounded-xl shadow-sm border-l-4 border-l-red-500">
+                        <div key={event.id} className={`bg-white border p-3 rounded-xl shadow-sm border-l-4 ${event.isHostEvent ? 'border-amber-100 border-l-amber-500' : 'border-red-100 border-l-red-500'}`}>
                           <p className="text-sm font-bold text-slate-800 mb-0.5">{event.eventName}</p>
                           <p className="text-xs text-slate-500 flex items-center"><Clock className="w-3 h-3 mr-1"/>{event.startTime} - {event.endTime}</p>
-                          <button onClick={() => onCancelBooking(event.bookingId)} className="mt-3 w-full text-xs font-bold bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg flex items-center justify-center"><Trash2 className="w-3 h-3 mr-1"/> Release Time</button>
+                          <button onClick={() => onCancelBooking(event.bookingId)} className={`mt-3 w-full text-xs font-bold px-3 py-2 rounded-lg flex items-center justify-center transition-colors ${event.isHostEvent ? 'bg-amber-50 hover:bg-amber-100 text-amber-700' : 'bg-red-50 hover:bg-red-100 text-red-600'}`}>
+                            <Trash2 className="w-3 h-3 mr-1"/> {event.isHostEvent ? 'Remove Event' : 'Cancel Visit'}
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -1851,18 +1889,32 @@
                 })()}
 
                 <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
-                  <h6 className="text-xs font-bold text-indigo-800 mb-3 flex items-center"><Plus className="w-3 h-3 mr-1"/> Add Time Slot</h6>
+                  <div className="flex bg-slate-200/50 rounded-lg p-1 mb-4">
+                    <button onClick={() => setAddMode('slot')} className={`flex-1 text-[10px] py-1.5 rounded-md font-bold transition-all uppercase tracking-wider ${addMode === 'slot' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}>Open Slot</button>
+                    <button onClick={() => setAddMode('event')} className={`flex-1 text-[10px] py-1.5 rounded-md font-bold transition-all uppercase tracking-wider ${addMode === 'event' ? 'bg-white shadow-sm text-amber-700' : 'text-slate-500 hover:text-slate-700'}`}>Fixed Event</button>
+                  </div>
+
                   <div className="flex items-center gap-2 mb-3">
                     <div className="flex-1">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase">Start</label>
-                      <input type="time" value={newTimeStart} onChange={e => setNewTimeStart(e.target.value)} className="w-full border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-indigo-500 bg-white shadow-sm" />
+                      <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Start</label>
+                      <input type="time" value={newTimeStart} onChange={e => setNewTimeStart(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-indigo-500 bg-white shadow-sm" />
                     </div>
                     <div className="flex-1">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase">End</label>
-                      <input type="time" value={newTimeEnd} onChange={e => setNewTimeEnd(e.target.value)} className="w-full border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-indigo-500 bg-white shadow-sm" />
+                      <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">End</label>
+                      <input type="time" value={newTimeEnd} onChange={e => setNewTimeEnd(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-indigo-500 bg-white shadow-sm" />
                     </div>
                   </div>
-                  <button onClick={handleAddSlot} className="w-full bg-indigo-600 text-white text-sm font-bold py-2 rounded-lg hover:bg-indigo-700 shadow-sm">Open Slot</button>
+
+                  {addMode === 'event' && (
+                     <div className="mb-4 animate-in fade-in slide-in-from-top-2">
+                       <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Event Name (Public)</label>
+                       <input type="text" placeholder="e.g. Family Dinner" value={newEventName} onChange={e => setNewEventName(e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:border-amber-500 bg-white shadow-sm" />
+                     </div>
+                  )}
+
+                  <button onClick={handleAddAction} className={`w-full text-white text-sm font-bold py-2 rounded-lg shadow-sm transition-colors ${addMode === 'slot' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-amber-600 hover:bg-amber-700'}`}>
+                    {addMode === 'slot' ? 'Add Open Slot' : 'Add Fixed Event'}
+                  </button>
                 </div>
               </div>
             </div>
