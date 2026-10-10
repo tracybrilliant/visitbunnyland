@@ -41,14 +41,14 @@
     import {
       Trash2, Check, Edit, List, Image as ImageIcon, Newspaper, ArrowDown,
       Home, Utensils, ChevronRight, ChevronLeft, Clock, MessageSquare,
-      CheckCircle2, User, Calendar as CalendarIcon, Settings, XCircle, Plus, Flower2
+      CheckCircle2, User, Calendar as CalendarIcon, Settings, XCircle, Plus, Flower2,
+      Lock
     } from 'https://esm.sh/lucide-react@0.378.0';
 
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
     // --- Firebase Configuration ---
-    // 替换为您自己的 Firebase 配置以激活实时数据库
     const firebaseConfig = {
       apiKey: "YOUR_API_KEY_HERE",
       authDomain: "your-project.firebaseapp.com",
@@ -57,6 +57,12 @@
       messagingSenderId: "123456789",
       appId: "1:123456789:web:abcdef"
     };
+
+    // ==========================================
+    // 🔒 安全设置：主人的访问口令 (Host PIN)
+    // 只有输入正确的口令才能进入 Host View。请将其修改为您自己的密码。
+    // ==========================================
+    const HOST_SECRET_PIN = "2026";
 
     // --- Mock Data & Initial State ---
     const INITIAL_HERO_IMAGES = [
@@ -126,31 +132,44 @@
       const [dbInstance, setDbInstance] = useState(null);
       const [isDbLoading, setIsDbLoading] = useState(true);
 
+      // 🔐 安全锁状态
+      const [showPinModal, setShowPinModal] = useState(false);
+      const [pinInput, setPinInput] = useState("");
+      const [pinError, setPinError] = useState(false);
+
+      // 🕵️ 访客身份识别 (LocalStorage)
+      const [myBookingIds, setMyBookingIds] = useState(() => {
+        const saved = localStorage.getItem('huas_kitchen_visitor_bookings');
+        return saved ? JSON.parse(saved) : [];
+      });
+
       const [menuItems, setMenuItems] = useState(INITIAL_MENU);
       const [questions, setQuestions] = useState(INITIAL_QUESTIONS);
       const [availableSlots, setAvailableSlots] = useState(INITIAL_AVAILABILITY);
       const [heroImages, setHeroImages] = useState(INITIAL_HERO_IMAGES);
       const [newsArticles, setNewsArticles] = useState(INITIAL_NEWS);
       
-      const [bookings, setBookings] = useState([
-        {
-          id: 'b1',
-          visitorName: 'Alice',
-          slots: [], 
-          answers: { q1: 'None', q2: 'Train' },
-          menuChoice: 'm1',
-          customProposal: '',
-          status: 'confirmed', 
-          eventName: "Alice's Welcome Lunch", 
-          createdAt: new Date().toISOString(),
-        }
-      ]);
+      const [bookings, setBookings] = useState([]);
 
       useEffect(() => {
         if (firebaseConfig.apiKey === "YOUR_API_KEY_HERE" || !firebaseConfig.apiKey) {
           console.log("Running in Mock Mode. Add Firebase config to enable real-time database.");
           setIsMockMode(true);
           setIsDbLoading(false);
+          // Load some mock bookings
+          setBookings([
+            {
+              id: 'b1',
+              visitorName: 'Alice',
+              slots: [], 
+              answers: { q1: 'None', q2: 'Train' },
+              menuChoice: 'm1',
+              customProposal: '',
+              status: 'confirmed', 
+              eventName: "Alice's Welcome Lunch", 
+              createdAt: new Date().toISOString(),
+            }
+          ]);
           return;
         }
 
@@ -222,7 +241,17 @@
       const wrappedSetAvailableSlots = (newSlots) => { setAvailableSlots(newSlots); updateSettingsDB({ availableSlots: newSlots }); };
       const wrappedSetHeroImages = (newImgs) => { setHeroImages(newImgs); updateSettingsDB({ heroImages: newImgs }); };
       const wrappedSetNewsArticles = (newNews) => { setNewsArticles(newNews); updateSettingsDB({ newsArticles: newNews }); };
-      const handleBook = (newBooking) => { setBookings([...bookings, newBooking]); updateBookingDB(newBooking); };
+      
+      const handleBook = (newBooking) => { 
+        setBookings([...bookings, newBooking]); 
+        updateBookingDB(newBooking);
+        
+        // 🔒 记住当前访客的预约ID
+        const updatedBookingIds = [...myBookingIds, newBooking.id];
+        setMyBookingIds(updatedBookingIds);
+        localStorage.setItem('huas_kitchen_visitor_bookings', JSON.stringify(updatedBookingIds));
+      };
+
       const handleUpdateBooking = (updatedBooking) => {
         setBookings(bookings.map(b => b.id === updatedBooking.id ? updatedBooking : b));
         updateBookingDB(updatedBooking);
@@ -263,6 +292,27 @@
         updateBookingDB(updatedBooking);
       };
 
+      // 🔐 处理口令提交
+      const handlePinSubmit = (e) => {
+        e.preventDefault();
+        if (pinInput === HOST_SECRET_PIN) {
+          setViewMode('host');
+          setShowPinModal(false);
+          setPinInput("");
+          setPinError(false);
+        } else {
+          setPinError(true);
+        }
+      };
+
+      // 🔐 触发要求输入口令
+      const requestHostAccess = () => {
+        if (viewMode === 'host') return;
+        setShowPinModal(true);
+        setPinError(false);
+        setPinInput("");
+      };
+
       const isImmersiveWelcome = viewMode === 'visitor' && showWelcome;
 
       if (isDbLoading) {
@@ -277,30 +327,67 @@
       }
 
       return (
-        <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+        <div className="min-h-screen bg-slate-50 text-slate-900 font-sans relative">
+          
+          {/* 🔐 访问口令弹窗 (PIN Modal) */}
+          {showPinModal && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl p-6 md:p-8 w-full max-w-sm animate-in zoom-in-95 duration-200 relative">
+                <button 
+                  onClick={() => setShowPinModal(false)}
+                  className="absolute top-4 right-4 text-slate-400 hover:text-slate-800 transition-colors"
+                >
+                  <XCircle className="w-6 h-6" />
+                </button>
+                <div className="flex justify-center mb-4">
+                  <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center">
+                    <Lock className="w-6 h-6 text-slate-600" />
+                  </div>
+                </div>
+                <h3 className="text-xl font-bold text-center text-slate-900 mb-2">Host Access</h3>
+                <p className="text-sm text-center text-slate-500 mb-6">Enter PIN to access host dashboard.</p>
+                <form onSubmit={handlePinSubmit}>
+                  <input 
+                    type="password" 
+                    autoFocus
+                    placeholder="Enter PIN"
+                    value={pinInput}
+                    onChange={(e) => setPinInput(e.target.value)}
+                    className={`w-full text-center text-xl tracking-[0.5em] font-mono border-b-2 bg-transparent outline-none py-2 mb-2 transition-colors ${pinError ? 'border-red-500 text-red-500' : 'border-slate-300 focus:border-slate-800'}`}
+                  />
+                  {pinError && <p className="text-xs text-red-500 text-center mb-4 animate-bounce">Incorrect PIN. Try again.</p>}
+                  {!pinError && <div className="h-4 mb-4"></div>}
+                  <button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl transition-colors">
+                    Unlock
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
           {!isImmersiveWelcome && (
             <nav className="bg-white shadow-sm sticky top-0 z-50">
               <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
                 <div className="flex items-center space-x-2">
-                  <Utensils className="w-5 h-5 text-indigo-600" />
-                  <span className="font-semibold text-lg tracking-tight">HUA's KITCHEN</span>
+                  <Utensils className="w-5 h-5 text-amber-700" />
+                  <span className="font-semibold text-lg tracking-tight uppercase text-zinc-800">HUA'S KITCHEN</span>
                 </div>
                 <div className="flex bg-slate-100 p-1 rounded-lg">
                   <button
                     onClick={() => { setViewMode('visitor'); setShowWelcome(true); }}
                     className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
-                      viewMode === 'visitor' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-900'
+                      viewMode === 'visitor' ? 'bg-white shadow text-amber-700' : 'text-slate-500 hover:text-slate-900'
                     }`}
                   >
                     Visitor View
                   </button>
                   <button
-                    onClick={() => setViewMode('host')}
-                    className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
-                      viewMode === 'host' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-900'
+                    onClick={requestHostAccess}
+                    className={`flex items-center px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+                      viewMode === 'host' ? 'bg-white shadow text-amber-700' : 'text-slate-500 hover:text-slate-900'
                     }`}
                   >
-                    Host View
+                    Host View {viewMode !== 'host' && <Lock className="w-3 h-3 ml-1.5 opacity-50"/>}
                   </button>
                 </div>
               </div>
@@ -312,14 +399,15 @@
               {!isMockMode && (
                  <span className="bg-green-500/90 text-white text-[10px] font-bold px-2 py-1.5 rounded shadow backdrop-blur uppercase tracking-wider border border-green-400 flex items-center">
                    <span className="w-1.5 h-1.5 bg-white rounded-full mr-1.5 animate-pulse"></span>
-                   Live DB Connected
+                   Live
                  </span>
               )}
               <button 
-                onClick={() => setViewMode('host')} 
-                className="bg-white/80 backdrop-blur text-xs px-4 py-2 rounded-lg shadow-xl text-slate-800 font-sans tracking-wide hover:bg-white transition-colors border border-white"
+                onClick={requestHostAccess} 
+                className="group flex items-center bg-white/80 backdrop-blur text-xs px-4 py-2 rounded-lg shadow-xl text-slate-800 font-sans tracking-wide hover:bg-white transition-colors border border-white"
               >
-                Switch to Host View
+                Host Login
+                <Lock className="w-3 h-3 ml-2 text-slate-400 group-hover:text-slate-600 transition-colors" />
               </button>
             </div>
           )}
@@ -338,6 +426,7 @@
                   menuItems={menuItems}
                   questions={questions}
                   bookings={bookings}
+                  myBookingIds={myBookingIds}
                   onBook={handleBook}
                   updateBooking={handleUpdateBooking}
                   onHome={() => setShowWelcome(true)}
@@ -481,8 +570,11 @@
       );
     }
 
-    function VisitorDashboard({ availableSlots, menuItems, questions, bookings, onBook, updateBooking, onHome }) {
+    function VisitorDashboard({ availableSlots, menuItems, questions, bookings, myBookingIds, onBook, updateBooking, onHome }) {
       const [activeTab, setActiveTab] = useState('new'); 
+      
+      // 🕵️ 访客隐私过滤：只传递属于当前浏览器的预约记录给 "My Visits" 面板
+      const visitorPrivateBookings = bookings.filter(b => myBookingIds.includes(b.id));
 
       return (
         <div className="space-y-6">
@@ -515,16 +607,17 @@
                 availableSlots={availableSlots} 
                 menuItems={menuItems}
                 questions={questions}
-                bookings={bookings}
+                bookings={bookings} // VisitorFlow needs ALL bookings to grey out calendar
                 onBook={onBook}
               />
             )}
             {activeTab === 'my_bookings' && (
               <VisitorBookings 
-                bookings={bookings} 
+                bookings={visitorPrivateBookings} // Only Private Bookings
                 updateBooking={updateBooking}
                 availableSlots={availableSlots}
                 menuItems={menuItems}
+                allBookings={bookings} // Passed down strictly for calendar rendering if they want to reschedule
               />
             )}
           </div>
@@ -532,7 +625,7 @@
       );
     }
 
-    function VisitorBookings({ bookings, updateBooking, availableSlots, menuItems }) {
+    function VisitorBookings({ bookings, updateBooking, availableSlots, menuItems, allBookings }) {
       const [rescheduleId, setRescheduleId] = useState(null);
       const [newSlots, setNewSlots] = useState([]);
 
@@ -553,7 +646,11 @@
       if (bookings.length === 0) {
         return (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 text-center">
-             <p className="text-slate-500">You have no visit requests yet.</p>
+             <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+               <CalendarIcon className="w-8 h-8 text-slate-300" />
+             </div>
+             <p className="text-slate-500 font-medium">You have no visit requests on this device.</p>
+             <p className="text-xs text-slate-400 mt-2">If you used another phone/browser to book, please check there.</p>
           </div>
         );
       }
@@ -565,17 +662,20 @@
             const menuName = booking.menuChoice === 'custom' ? 'Custom Activity / Menu' : (menuItems.find(m => m.id === booking.menuChoice)?.name || 'None');
 
             return (
-              <div key={booking.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
+              <div key={booking.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 relative overflow-hidden">
+                {/* Status Indicator Bar */}
+                <div className={`absolute left-0 top-0 bottom-0 w-1 ${booking.status === 'pending' ? 'bg-yellow-400' : booking.status === 'confirmed' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                
                 <div className="flex justify-between items-start mb-4 border-b border-slate-100 pb-4">
                   <div>
                     <h3 className="text-lg font-bold text-slate-800">Visit for {booking.visitorName}</h3>
                     <span className="text-sm text-slate-500">Requested on {format(parse(booking.createdAt, "yyyy-MM-dd'T'HH:mm:ss.SSSX", new Date()), 'MMM d, yyyy')}</span>
                   </div>
                   <div>
-                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wide
-                      ${booking.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 
-                        booking.status === 'confirmed' ? 'bg-green-100 text-green-700' : 
-                        'bg-red-100 text-red-700'}
+                    <span className={`text-xs font-bold px-3 py-1.5 rounded-lg uppercase tracking-wide
+                      ${booking.status === 'pending' ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' : 
+                        booking.status === 'confirmed' ? 'bg-green-50 text-green-700 border border-green-200' : 
+                        'bg-red-50 text-red-700 border border-red-200'}
                     `}>
                       {booking.status}
                     </span>
@@ -588,15 +688,21 @@
                       <h4 className="text-sm font-semibold text-slate-700 mb-2">Requested Times</h4>
                       <ul className="space-y-2">
                         {booking.slots.map(slot => (
-                          <li key={slot.id} className="text-sm bg-slate-50 p-2 rounded border border-slate-100">
-                             <span className="font-medium">{format(parse(slot.date, 'yyyy-MM-dd', new Date()), 'MMM d, yyyy')}</span> at {slot.startTime}
+                          <li key={slot.id} className="text-sm bg-slate-50 p-3 rounded-lg border border-slate-100 flex justify-between items-center">
+                             <div>
+                               <span className="font-bold text-slate-700">{format(parse(slot.date, 'yyyy-MM-dd', new Date()), 'MMM d, yyyy')}</span>
+                               <span className="text-slate-500 block text-xs mt-0.5">{slot.startTime}</span>
+                             </div>
+                             {booking.status === 'confirmed' && (
+                               <div className="text-green-600 bg-green-50 p-1.5 rounded-full"><Check className="w-4 h-4"/></div>
+                             )}
                           </li>
                         ))}
                       </ul>
                       {booking.status !== 'rejected' && (
                         <button 
                           onClick={() => handleStartReschedule(booking)}
-                          className="mt-3 text-sm text-indigo-600 font-medium flex items-center hover:underline"
+                          className="mt-3 text-sm text-indigo-600 font-medium flex items-center hover:underline bg-indigo-50 px-3 py-1.5 rounded-lg"
                         >
                           <Edit className="w-4 h-4 mr-1" /> Change Times (Reschedule)
                         </button>
@@ -619,7 +725,7 @@
                     <CalendarPicker 
                       mode="visitor"
                       availableSlots={availableSlots} 
-                      confirmedBookings={bookings.filter(b => b.status === 'confirmed')}
+                      confirmedBookings={allBookings.filter(b => b.status === 'confirmed')}
                       selectedSlots={newSlots} 
                       onSlotToggle={(slot) => {
                         setNewSlots(prev => {
@@ -937,6 +1043,14 @@
               <h1 className="text-3xl font-bold text-slate-900">Host Dashboard</h1>
               <p className="text-slate-500 mt-1">Manage your availability, menus, and incoming visit requests.</p>
             </div>
+            {/* 🚪 退出主人模式的按钮 */}
+            <button 
+              onClick={() => location.reload()} 
+              className="text-sm font-medium text-slate-500 hover:text-slate-900 flex items-center bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm transition-colors"
+            >
+              <Lock className="w-4 h-4 mr-2" />
+              Lock & Exit
+            </button>
           </div>
 
           <div className="flex space-x-1 bg-slate-100 p-1 rounded-xl w-fit mb-6 overflow-x-auto max-w-full">
